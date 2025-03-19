@@ -72,7 +72,7 @@ def create_quiz():
     quiz_data = request.get_json()
 
     # Validate that all required fields are present in the request
-    required_fields = ['name', 'description', 'image', 'questions', 'category', 'difficulty']
+    required_fields = ['name', 'description', 'image', 'category', 'difficulty']
     for field in required_fields:
         if field not in quiz_data:
             return jsonify({'error': f'Missing required field: {field}'}), 400
@@ -87,13 +87,12 @@ def create_quiz():
 
         # Insert the new quiz into the database
         cursor.execute('''
-            INSERT INTO quiz (name, description, image, questions, category, difficulty, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO quiz (name, description, image, category, difficulty, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
         ''', (
             quiz_data['name'],
             quiz_data['description'],
             quiz_data['image'],
-            quiz_data['questions'],
             quiz_data['category'],
             quiz_data['difficulty'],
             current_time
@@ -345,8 +344,8 @@ def delete_question(question_id):
 @app.route('/api/quizzes/<int:quiz_id>/questions', methods=['GET'])
 def get_questions_by_quiz_id(quiz_id):
     """
-    Endpoint to retrieve all questions for a specific quiz by quiz_id.
-    Returns a JSON array of question objects.
+    Endpoint to retrieve quiz details and all its questions by quiz_id.
+    Returns a JSON object containing quiz details and an array of question objects.
     """
     conn = None
     try:
@@ -354,17 +353,19 @@ def get_questions_by_quiz_id(quiz_id):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # First, verify that the quiz exists and get its questions identifier
-        cursor.execute("SELECT questions FROM quiz WHERE id = ?", (quiz_id,))
+        # First, get the quiz details
+        cursor.execute("SELECT * FROM quiz WHERE id = ?", (quiz_id,))
         quiz = cursor.fetchone()
 
         if not quiz:
             return jsonify({'error': f'Quiz with ID {quiz_id} not found'}), 404
 
-        # Get the questions identifier from the quiz
-        questions_id = quiz['questions']
+        # Convert quiz SQLite Row to dictionary
+        quiz_dict = {}
+        for key in quiz.keys():
+            quiz_dict[key] = quiz[key]
 
-        # Execute query to get all questions for the specified quiz_id
+        # Get all questions for the specified quiz_id
         cursor.execute("SELECT * FROM questions WHERE quiz_id = ?", (quiz_id,))
         questions = cursor.fetchall()
 
@@ -385,10 +386,9 @@ def get_questions_by_quiz_id(quiz_id):
 
             question_list.append(question_dict)
 
-        # Return the list of questions as JSON
+        # Return both quiz details and questions as JSON
         return jsonify({
-            'quiz_id': quiz_id,
-            'questions_id': questions_id,
+            'quiz': quiz_dict,
             'questions': question_list,
             'count': len(question_list)
         })
@@ -625,6 +625,71 @@ def create_quiz_with_questions():
 
     finally:
         # Ensure connection is closed even if an error occurs
+        if conn:
+            conn.close()
+
+
+@app.route('/api/quizzes/category-samples', methods=['GET'])
+def get_category_samples():
+    """
+    Endpoint to retrieve random quizzes from each category.
+    Query parameter 'limit' determines how many quizzes per category (default: 3)
+    Returns a JSON object with categories as keys and arrays of quizzes as values.
+    """
+    conn = None
+    try:
+        # Get the limit parameter from query string, default to 3 if not provided
+        limit = request.args.get('limit', default=3, type=int)
+
+        # Establish database connection
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # First, get all unique categories
+        cursor.execute("SELECT DISTINCT category FROM quiz ORDER BY category")
+        categories = cursor.fetchall()
+
+        # Prepare the result dictionary
+        result = {}
+
+        # For each category, get random quizzes up to the limit
+        for category_row in categories:
+            category = category_row['category']
+            cursor.execute("""
+                SELECT * FROM quiz
+                WHERE category = ?
+                ORDER BY RANDOM()
+                LIMIT ?
+            """, (category, limit))
+
+            quizzes = cursor.fetchall()
+
+            # Convert the SQLite Row objects to dictionaries
+            quiz_list = []
+            for quiz in quizzes:
+                quiz_dict = {}
+                for key in quiz.keys():
+                    quiz_dict[key] = quiz[key]
+                quiz_list.append(quiz_dict)
+
+            result[category] = quiz_list
+
+        return jsonify({
+            'success': True,
+            'samples': result,
+            'total_categories': len(categories),
+            'quizzes_per_category': limit
+        })
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'details': error_details
+        }), 500
+    finally:
         if conn:
             conn.close()
 

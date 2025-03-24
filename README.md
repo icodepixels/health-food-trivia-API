@@ -1,6 +1,98 @@
-# Trivia API Documentation
+# Trivia Quiz API
 
-A Flask-based REST API for managing trivia quizzes and questions.
+A Flask-based REST API for managing trivia quizzes and questions. This API allows you to create, retrieve, and manage quizzes and their associated questions.
+
+## Project Structure
+Flask==2.0.1
+Flask-CORS==3.0.10atabase file (`trivia.db`)
+
+
+- The `quiz` table
+- The `questions` table
+
+### 5. Start the Application
+There are two ways to run the application:
+
+Run the database initialization:
+```bash
+python -m app.init_db
+```
+
+#### Development Mode
+```bash
+# From the project root directory
+python run.py
+```
+This will start the server with debug mode enabled:
+- Auto-reloads when code changes
+- Detailed error messages
+- Running on http://localhost:5000
+
+#### Production Mode
+```bash
+# Set environment variable for production
+# Windows
+set FLASK_ENV=production
+
+# macOS/Linux
+export FLASK_ENV=production
+
+# Run the application
+python run.py
+```
+
+### Verify Installation
+
+1. Check if the server is running:
+```bash
+curl http://localhost:5000/api/categories
+```
+Should return an empty array `[]` if the database is new.
+
+2. Create a test quiz:
+```bash
+curl -X POST http://localhost:5000/api/quizzes \
+-H "Content-Type: application/json" \
+-d '{
+  "name": "Test Quiz",
+  "description": "Testing the API",
+  "image": "https://example.com/test.jpg",
+  "category": "Test",
+  "difficulty": "Easy"
+}'
+```
+
+### Troubleshooting
+
+If you encounter any issues:
+
+1. **Database Errors**
+   - Delete the `trivia.db` file
+   - Run the initialization script again
+   ```bash
+   python -m app.init_db
+   ```
+
+2. **Port Already in Use**
+   - Change the port in `run.py`:
+   ```python
+   if __name__ == '__main__':
+       app.run(debug=True, port=5001)  # Change to different port
+   ```
+
+3. **Permission Issues**
+   - Check file permissions for the database:
+   ```bash
+   # Linux/macOS
+   chmod 666 trivia.db
+   ```
+
+4. **Module Not Found Errors**
+   - Verify you're in the virtual environment
+   - Reinstall dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ## Base URL
 `/api`
@@ -263,10 +355,146 @@ CREATE TABLE questions (
 ```
 ```
 
-This README provides comprehensive documentation for all endpoints currently implemented in your app.js, including the new category samples endpoint. It includes:
-- All available endpoints
-- Request/response formats
-- Error handling
-- Database schema
+### Users and Quiz Results
 
-If you have an existing README with additional sections (like installation instructions, deployment guide, etc.), let me know and I can help integrate this API documentation with your existing content.
+#### Create User
+- **URL:** `/api/users`
+- **Method:** `POST`
+- **Data Parameters:**
+  ```json
+  {
+    "email": "user@example.com"
+  }
+  ```
+- **Success Response:**
+  - **Code:** 201
+  - **Content:**
+    ```json
+    {
+      "success": true,
+      "message": "User created successfully",
+      "user_id": 1
+    }
+    ```
+- **Error Response:**
+  - **Code:** 409 CONFLICT
+    ```json
+    {
+      "success": false,
+      "message": "User already exists",
+      "user_id": 1
+    }
+    ```
+
+#### Save Quiz Result
+- **URL:** `/api/users/:email/results`
+- **Method:** `POST`
+- **Data Parameters:**
+  ```json
+  {
+    "quiz_id": 1,
+    "score": 85.5,
+    "answers": [
+      {
+        "question_id": 1,
+        "selected_answer": 2,
+        "is_correct": true
+      }
+    ]
+  }
+  ```
+- **Success Response:**
+  - **Code:** 201
+  - **Content:**
+    ```json
+    {
+      "success": true,
+      "message": "Quiz result saved successfully",
+      "result_id": 1
+    }
+    ```
+
+#### Get User Results
+- **URL:** `/api/users/:email/results`
+- **Method:** `GET`
+- **Success Response:**
+  - **Code:** 200
+  - **Content:**
+    ```json
+    {
+      "email": "user@example.com",
+      "results": [
+        {
+          "result_id": 1,
+          "quiz_id": 1,
+          "quiz_name": "Science Quiz",
+          "category": "Science",
+          "difficulty": "Medium",
+          "score": 85.5,
+          "answers": [
+            {
+              "question_id": 1,
+              "selected_answer": 2,
+              "is_correct": true
+            }
+          ],
+          "completed_at": "2024-03-20 15:30:00"
+        }
+      ],
+      "total_results": 1
+    }
+    ```
+
+#### Get User Statistics
+- **URL:** `/api/users/:email/stats`
+- **Method:** `GET`
+- **Success Response:**
+  - **Code:** 200
+  - **Content:**
+    ```json
+    {
+      "email": "user@example.com",
+      "overall_stats": {
+        "total_quizzes": 10,
+        "average_score": 82.5,
+        "highest_score": 100,
+        "lowest_score": 65,
+        "unique_quizzes": 8
+      },
+      "category_stats": [
+        {
+          "category": "Science",
+          "quizzes_taken": 5,
+          "average_score": 85.5
+        }
+      ]
+    }
+    ```
+
+### Database Schema
+
+[After existing schema, add:]
+
+### Users Table
+```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE NOT NULL,
+    created_at TEXT NOT NULL
+)
+```
+
+### Quiz Results Table
+```sql
+CREATE TABLE quiz_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    quiz_id INTEGER NOT NULL,
+    score REAL NOT NULL,
+    answers TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users (id),
+    FOREIGN KEY (quiz_id) REFERENCES quiz (id)
+)
+```
+```

@@ -1,2 +1,28 @@
+# Web Framework and Extensions
 Flask==2.0.1
 Flask-CORS==3.0.10
+Werkzeug==2.0.1
+
+# Database
+SQLite3==2.6.0
+
+# Date and Time handling
+python-dateutil==2.8.2
+
+# JSON handling
+simplejson==3.17.6
+
+# Development and Debug Tools
+python-dotenv==0.19.0
+pytest==6.2.5
+pytest-flask==1.2.0
+
+# Production Server (optional but recommended)
+gunicorn==20.1.0
+
+# Utilities
+six==1.16.0
+click==8.0.1
+itsdangerous==2.0.1
+Jinja2==3.0.1
+MarkupSafe==2.0.1

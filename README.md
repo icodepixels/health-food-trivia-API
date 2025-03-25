@@ -21,7 +21,8 @@ python -m app.init_db
 #### Development Mode
 ```bash
 # From the project root directory
-python run.py
+# python run.py
+uvicorn run:app --host 0.0.0.0 --port 9000 --reload
 ```
 This will start the server with debug mode enabled:
 - Auto-reloads when code changes

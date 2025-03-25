@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
-from datetime import datetime
+from datetime import datetime, date
+from pydantic.json_schema import JsonSchemaValue
 
 class QuestionBase(BaseModel):
     question_text: str = Field(
@@ -80,9 +81,14 @@ class QuizBase(BaseModel):
 class QuizCreate(QuizBase):
     pass
 
-class Quiz(QuizBase):
+class Quiz(BaseModel):
     id: int
-    created_at: datetime
+    name: str
+    description: str
+    image: str
+    category: str
+    difficulty: str
+    created_at: date
 
     class Config:
         from_attributes = True

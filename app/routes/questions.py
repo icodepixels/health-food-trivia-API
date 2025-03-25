@@ -1,14 +1,15 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict
-from app.database import get_db_connection
+from databases import Database
+from app.database import get_db
 from app.models.schemas import Question, QuestionCreate, QuizWithQuestions
 import json
 import traceback
 
 router = APIRouter()
 
-@router.post("/api/questions", response_model=Dict)
-async def add_questions(questions: List[QuestionCreate]):
+@router.post("/questions", response_model=Dict)
+async def add_questions(questions: List[QuestionCreate], db: Database = Depends(get_db)):
     """Add multiple questions to quizzes"""
     conn = None
     try:
@@ -82,8 +83,8 @@ async def add_questions(questions: List[QuestionCreate]):
         if conn:
             conn.close()
 
-@router.delete("/api/questions/{question_id}")
-async def delete_question(question_id: int):
+@router.delete("/questions/{question_id}")
+async def delete_question(question_id: int, db: Database = Depends(get_db)):
     """Delete a specific question"""
     try:
         conn = get_db_connection()
@@ -110,15 +111,13 @@ async def delete_question(question_id: int):
         if conn:
             conn.close()
 
-@router.get("/api/quizzes/{quiz_id}/questions", response_model=QuizWithQuestions)
-async def get_questions_by_quiz_id(quiz_id: int):
+@router.get("/quizzes/{quiz_id}/questions", response_model=QuizWithQuestions)
+async def get_questions_by_quiz_id(quiz_id: int, db: Database = Depends(get_db)):
     """Get quiz details and all its questions"""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT * FROM quiz WHERE id = ?", (quiz_id,))
-        quiz = cursor.fetchone()
+        # First, get the quiz details
+        quiz_query = "SELECT * FROM quiz WHERE id = :quiz_id"
+        quiz = await db.fetch_one(quiz_query, values={"quiz_id": quiz_id})
 
         if not quiz:
             raise HTTPException(
@@ -128,14 +127,18 @@ async def get_questions_by_quiz_id(quiz_id: int):
 
         quiz_dict = dict(quiz)
 
-        cursor.execute("SELECT * FROM questions WHERE quiz_id = ?", (quiz_id,))
-        questions = cursor.fetchall()
+        # Get all questions for this quiz
+        questions_query = "SELECT * FROM questions WHERE quiz_id = :quiz_id"
+        questions = await db.fetch_all(questions_query, values={"quiz_id": quiz_id})
 
         question_list = []
         for question in questions:
             question_dict = dict(question)
             if 'choices' in question_dict and question_dict['choices']:
-                question_dict['choices'] = json.loads(question_dict['choices'])
+                try:
+                    question_dict['choices'] = json.loads(question_dict['choices'])
+                except json.JSONDecodeError:
+                    pass
             question_list.append(question_dict)
 
         quiz_dict['questions'] = question_list
@@ -143,6 +146,3 @@ async def get_questions_by_quiz_id(quiz_id: int):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if conn:
-            conn.close()

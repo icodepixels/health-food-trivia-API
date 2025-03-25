@@ -8,11 +8,7 @@ from datetime import datetime
 import json
 import traceback
 
-router = APIRouter(
-    prefix="/api",
-    tags=["quizzes"],
-    responses={404: {"description": "Not found"}},
-)
+router = APIRouter()
 
 @router.get("/quizzes",
     response_model=List[Quiz],
@@ -23,14 +19,21 @@ async def get_quizzes(
     category: Optional[str] = None,
     db: Database = Depends(get_db)
 ):
-    if category:
-        query = "SELECT * FROM quiz WHERE category = :category"
-        quizzes = await db.fetch_all(query=query, values={"category": category})
-    else:
-        query = "SELECT * FROM quiz"
-        quizzes = await db.fetch_all(query=query)
+    try:
+        if category:
+            query = "SELECT * FROM quiz WHERE category = :category"
+            quizzes = await db.fetch_all(query=query, values={"category": category})
+        else:
+            query = "SELECT * FROM quiz"
+            quizzes = await db.fetch_all(query=query)
 
-    return [dict(quiz) for quiz in quizzes]
+        # Convert the results to a list of dictionaries
+        return [dict(quiz) for quiz in quizzes]
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {str(e)}"
+        )
 
 @router.post("/quizzes",
     response_model=Quiz,
@@ -42,16 +45,18 @@ async def create_quiz(
     quiz: QuizCreate,
     db: Database = Depends(get_db)
 ):
-    query = """
-        INSERT INTO quiz (name, description, image, category, difficulty, created_at)
-        VALUES (:name, :description, :image, :category, :difficulty, :created_at)
-    """
-    values = {
-        **quiz.dict(),
-        "created_at": datetime.now().strftime('%Y-%m-%d')
-    }
-
     try:
+        current_time = datetime.now().date().isoformat()  # Format as YYYY-MM-DD
+
+        query = """
+            INSERT INTO quiz (name, description, image, category, difficulty, created_at)
+            VALUES (:name, :description, :image, :category, :difficulty, :created_at)
+        """
+        values = {
+            **quiz.dict(),
+            "created_at": current_time
+        }
+
         quiz_id = await db.execute(query=query, values=values)
 
         # Fetch the created quiz
@@ -60,7 +65,10 @@ async def create_quiz(
 
         return dict(created_quiz)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create quiz: {str(e)}"
+        )
 
 @router.delete("/quizzes/{quiz_id}", status_code=200)
 async def delete_quiz(quiz_id: int, db: Database = Depends(get_db)):

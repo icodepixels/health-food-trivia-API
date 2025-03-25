@@ -1,73 +1,38 @@
 import sqlite3
-from config import Config
+from databases import Database
+from sqlalchemy import create_engine, MetaData
+from fastapi import Depends
+from typing import AsyncGenerator
 
+# Database URL
+DATABASE_URL = "sqlite:///trivia.db"
+
+# Create Database instance for async operations
+database = Database(DATABASE_URL)
+metadata = MetaData()
+
+# Create SQLAlchemy engine for migrations/table creation
+engine = create_engine(DATABASE_URL)
+metadata.create_all(engine)
+
+# Legacy synchronous connection function
 def get_db_connection():
-    """
-    Create and return a database connection with row factory enabled.
-    This allows accessing columns by name instead of index.
-    """
-    conn = sqlite3.connect(Config.DATABASE)
+    """Create a database connection with row factory enabled"""
+    conn = sqlite3.connect('trivia.db')
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db():
-    """
-    Initialize the database by creating necessary tables.
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
+# New async database functions
+async def get_database() -> AsyncGenerator[Database, None]:
+    """Dependency for getting async database session"""
+    try:
+        await database.connect()
+        yield database
+    finally:
+        await database.disconnect()
 
-    # Create users table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        created_at TEXT NOT NULL
-    )
-    ''')
-
-    # Create quiz_results table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS quiz_results (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        quiz_id INTEGER NOT NULL,
-        score REAL NOT NULL,
-        answers TEXT NOT NULL,
-        completed_at TEXT NOT NULL,
-        FOREIGN KEY (user_id) REFERENCES users (id),
-        FOREIGN KEY (quiz_id) REFERENCES quiz (id)
-    )
-    ''')
-
-    # Create quiz table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS quiz (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        description TEXT NOT NULL,
-        image TEXT NOT NULL,
-        category TEXT NOT NULL,
-        difficulty TEXT NOT NULL,
-        created_at TEXT NOT NULL
-    )
-    ''')
-
-    # Create questions table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS questions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        quiz_id INTEGER NOT NULL,
-        question_text TEXT NOT NULL,
-        choices TEXT NOT NULL,
-        correct_answer_index INTEGER NOT NULL,
-        explanation TEXT NOT NULL,
-        category TEXT NOT NULL,
-        difficulty TEXT NOT NULL,
-        image TEXT NOT NULL,
-        FOREIGN KEY (quiz_id) REFERENCES quiz (id)
-    )
-    ''')
-
-    conn.commit()
-    conn.close()
+# FastAPI dependency
+async def get_db():
+    """Async database connection dependency"""
+    async with database.connection() as connection:
+        yield connection

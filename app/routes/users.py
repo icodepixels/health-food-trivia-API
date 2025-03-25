@@ -1,129 +1,105 @@
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, HTTPException
+from typing import Dict, List
 from app.database import get_db_connection
+from app.models.schemas import (
+    UserCreate, User, QuizResult, QuizResultResponse,
+    UserStatsResponse
+)
 import json
 from datetime import datetime
 
-bp = Blueprint('users', __name__)
+router = APIRouter()
 
-@bp.route('/api/users', methods=['POST'])
-def create_user():
-    """
-    Create a new user or update existing user by email.
-    """
-    data = request.get_json()
-
-    if 'email' not in data:
-        return jsonify({'error': 'Email is required'}), 400
-
-    conn = None
+@router.post("/users", response_model=Dict)
+async def create_user(user: UserCreate):
+    """Create a new user or update existing user by email"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        print(f"Creating user with email: {cursor}")
+        cursor.execute("SELECT id FROM users WHERE email = ?", (user.email,))
+        existing_user = cursor.fetchone()
 
-        # Check if user exists
-        cursor.execute("SELECT id FROM users WHERE email = ?", (data['email'],))
-        user = cursor.fetchone()
-
-        if user:
-            return jsonify({
+        if existing_user:
+            return {
                 'success': False,
                 'message': 'User already exists',
-                'user_id': user['id']
-            }), 200
+                'user_id': existing_user['id']
+            }
 
-        # Create new user
         cursor.execute('''
             INSERT INTO users (email, created_at)
             VALUES (?, ?)
-        ''', (data['email'], datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        ''', (user.email, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
 
         conn.commit()
         new_user_id = cursor.lastrowid
 
-        return jsonify({
+        return {
             'success': True,
             'message': 'User created successfully',
             'user_id': new_user_id
-        }), 201
+        }
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             conn.close()
 
-@bp.route('/api/users/<string:email>/results', methods=['POST'])
-def save_quiz_result(email):
-    """
-    Save a quiz result for a user.
-    """
-    data = request.get_json()
-    required_fields = ['quiz_id', 'score', 'answers']
-
-    for field in required_fields:
-        if field not in data:
-            return jsonify({'error': f'Missing required field: {field}'}), 400
-
-    conn = None
+@router.post("/users/{email}/results", response_model=Dict)
+async def save_quiz_result(email: str, result: QuizResult):
+    """Save a quiz result for a user"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Get user ID
         cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
         user = cursor.fetchone()
 
         if not user:
-            return jsonify({'error': 'User not found'}), 404
+            raise HTTPException(status_code=404, detail="User not found")
 
-        # Save quiz result
         cursor.execute('''
             INSERT INTO quiz_results (
                 user_id, quiz_id, score, answers, completed_at
             ) VALUES (?, ?, ?, ?, ?)
         ''', (
             user['id'],
-            data['quiz_id'],
-            data['score'],
-            json.dumps(data['answers']),
+            result.quiz_id,
+            result.score,
+            json.dumps(result.answers),
             datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         ))
 
         conn.commit()
         result_id = cursor.lastrowid
 
-        return jsonify({
+        return {
             'success': True,
             'message': 'Quiz result saved successfully',
             'result_id': result_id
-        }), 201
+        }
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             conn.close()
 
-@bp.route('/api/users/<string:email>/results', methods=['GET'])
-def get_user_results(email):
-    """
-    Get all quiz results for a user.
-    """
-    conn = None
+@router.get("/users/{email}/results")
+async def get_user_results(email: str):
+    """Get all quiz results for a user"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Get user ID
         cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
         user = cursor.fetchone()
 
         if not user:
-            return jsonify({'error': 'User not found'}), 404
+            raise HTTPException(status_code=404, detail="User not found")
 
-        # Get all results with quiz details
         cursor.execute('''
             SELECT
                 qr.id as result_id,
@@ -141,47 +117,39 @@ def get_user_results(email):
         ''', (user['id'],))
 
         results = cursor.fetchall()
-
-        # Format results
         formatted_results = []
+
         for result in results:
-            result_dict = {}
-            for key in result.keys():
-                result_dict[key] = result[key]
-                if key == 'answers':
-                    result_dict[key] = json.loads(result[key])
+            result_dict = dict(result)
+            if 'answers' in result_dict:
+                result_dict['answers'] = json.loads(result_dict['answers'])
             formatted_results.append(result_dict)
 
-        return jsonify({
+        return {
             'email': email,
             'results': formatted_results,
             'total_results': len(formatted_results)
-        })
+        }
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             conn.close()
 
-@bp.route('/api/users/<string:email>/stats', methods=['GET'])
-def get_user_stats(email):
-    """
-    Get user statistics across all quizzes.
-    """
-    conn = None
+@router.get("/users/{email}/stats", response_model=UserStatsResponse)
+async def get_user_stats(email: str):
+    """Get user statistics across all quizzes"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Get user ID
         cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
         user = cursor.fetchone()
 
         if not user:
-            return jsonify({'error': 'User not found'}), 404
+            raise HTTPException(status_code=404, detail="User not found")
 
-        # Get overall stats
         cursor.execute('''
             SELECT
                 COUNT(*) as total_quizzes,
@@ -193,9 +161,8 @@ def get_user_stats(email):
             WHERE user_id = ?
         ''', (user['id'],))
 
-        stats = cursor.fetchone()
+        stats = dict(cursor.fetchone())
 
-        # Get category breakdown
         cursor.execute('''
             SELECT
                 q.category,
@@ -207,28 +174,16 @@ def get_user_stats(email):
             GROUP BY q.category
         ''', (user['id'],))
 
-        categories = cursor.fetchall()
+        category_stats = [dict(cat) for cat in cursor.fetchall()]
 
-        # Format response
-        stats_dict = {}
-        for key in stats.keys():
-            stats_dict[key] = stats[key]
-
-        category_stats = []
-        for cat in categories:
-            cat_dict = {}
-            for key in cat.keys():
-                cat_dict[key] = cat[key]
-            category_stats.append(cat_dict)
-
-        return jsonify({
+        return {
             'email': email,
-            'overall_stats': stats_dict,
+            'overall_stats': stats,
             'category_stats': category_stats
-        })
+        }
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn:
             conn.close()

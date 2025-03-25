@@ -1,103 +1,79 @@
-from flask import Blueprint, jsonify, request
-from app.database import get_db_connection
+from fastapi import APIRouter, HTTPException, Depends, Query
+from typing import List, Dict, Optional
+from databases import Database
+from app.database import get_db
+from app.models.schemas import Quiz, QuizCreate, Question, QuestionCreate, QuizWithQuestions
+import sqlite3
 from datetime import datetime
 import json
 import traceback
 
-bp = Blueprint('quizzes', __name__)
+router = APIRouter(
+    prefix="/api",
+    tags=["quizzes"],
+    responses={404: {"description": "Not found"}},
+)
 
-@bp.route('/api/quizzes', methods=['GET'])
-def get_quizzes():
-    """
-    Endpoint to retrieve quizzes from the database.
-    Optional query parameter 'category' to filter quizzes by category.
-    Returns a JSON array of quiz objects.
-    """
-    category = request.args.get('category')
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
+@router.get("/quizzes",
+    response_model=List[Quiz],
+    summary="Get all quizzes",
+    description="Retrieve all quizzes, optionally filtered by category"
+)
+async def get_quizzes(
+    category: Optional[str] = None,
+    db: Database = Depends(get_db)
+):
     if category:
-        cursor.execute("SELECT * FROM quiz WHERE category = ?", (category,))
+        query = "SELECT * FROM quiz WHERE category = :category"
+        quizzes = await db.fetch_all(query=query, values={"category": category})
     else:
-        cursor.execute("SELECT * FROM quiz")
+        query = "SELECT * FROM quiz"
+        quizzes = await db.fetch_all(query=query)
 
-    quizzes = cursor.fetchall()
+    return [dict(quiz) for quiz in quizzes]
 
-    quiz_list = []
-    for quiz in quizzes:
-        quiz_dict = {}
-        for key in quiz.keys():
-            quiz_dict[key] = quiz[key]
-        quiz_list.append(quiz_dict)
-
-    conn.close()
-    return jsonify(quiz_list)
-
-@bp.route('/api/quizzes', methods=['POST'])
-def create_quiz():
+@router.post("/quizzes",
+    response_model=Quiz,
+    status_code=201,
+    summary="Create a new quiz",
+    description="Create a new quiz with the provided details"
+)
+async def create_quiz(
+    quiz: QuizCreate,
+    db: Database = Depends(get_db)
+):
+    query = """
+        INSERT INTO quiz (name, description, image, category, difficulty, created_at)
+        VALUES (:name, :description, :image, :category, :difficulty, :created_at)
     """
-    Endpoint to create a new quiz.
-    Accepts JSON data with quiz details and inserts it into the database.
-    Returns the newly created quiz with its ID.
-    """
-    quiz_data = request.get_json()
-    required_fields = ['name', 'description', 'image', 'category', 'difficulty']
-
-    for field in required_fields:
-        if field not in quiz_data:
-            return jsonify({'error': f'Missing required field: {field}'}), 400
-
-    current_time = datetime.now().strftime('%Y-%m-%d')
+    values = {
+        **quiz.dict(),
+        "created_at": datetime.now().strftime('%Y-%m-%d')
+    }
 
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        quiz_id = await db.execute(query=query, values=values)
 
-        cursor.execute('''
-            INSERT INTO quiz (name, description, image, category, difficulty, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
-            quiz_data['name'],
-            quiz_data['description'],
-            quiz_data['image'],
-            quiz_data['category'],
-            quiz_data['difficulty'],
-            current_time
-        ))
+        # Fetch the created quiz
+        fetch_query = "SELECT * FROM quiz WHERE id = :id"
+        created_quiz = await db.fetch_one(fetch_query, values={"id": quiz_id})
 
-        conn.commit()
-        new_quiz_id = cursor.lastrowid
-
-        cursor.execute("SELECT * FROM quiz WHERE id = ?", (new_quiz_id,))
-        new_quiz = cursor.fetchone()
-
-        result = {}
-        for key in new_quiz.keys():
-            result[key] = new_quiz[key]
-
-        conn.close()
-        return jsonify(result), 201
-
+        return dict(created_quiz)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@bp.route('/api/quizzes/<int:quiz_id>', methods=['DELETE'])
-def delete_quiz(quiz_id):
-    """
-    Endpoint to delete a specific quiz by its ID.
-    Also deletes all associated questions to maintain database integrity.
-    """
-    conn = None
+@router.delete("/quizzes/{quiz_id}", status_code=200)
+async def delete_quiz(quiz_id: int, db: Database = Depends(get_db)):
+    """Delete a quiz and its questions"""
     try:
-        conn = get_db_connection()
+        conn = await db.connection()
         cursor = conn.cursor()
 
         cursor.execute("SELECT id FROM quiz WHERE id = ?", (quiz_id,))
         quiz = cursor.fetchone()
 
         if not quiz:
-            return jsonify({'error': f'Quiz with ID {quiz_id} not found'}), 404
+            raise HTTPException(status_code=404, detail=f"Quiz with ID {quiz_id} not found")
 
         conn.execute("BEGIN TRANSACTION")
         cursor.execute("DELETE FROM questions WHERE quiz_id = ?", (quiz_id,))
@@ -106,29 +82,15 @@ def delete_quiz(quiz_id):
 
         conn.commit()
 
-        if cursor.rowcount > 0:
-            return jsonify({
-                'success': True,
-                'message': f'Quiz with ID {quiz_id} was deleted successfully',
-                'questions_deleted': questions_deleted
-            }), 200
-        else:
-            conn.rollback()
-            return jsonify({'error': 'Failed to delete the quiz'}), 500
+        return {
+            "success": True,
+            "message": f"Quiz with ID {quiz_id} was deleted successfully",
+            "questions_deleted": questions_deleted
+        }
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        error_details = traceback.format_exc()
-        return jsonify({
-            'error': str(e),
-            'details': error_details
-        }), 500
-    finally:
-        if conn:
-            conn.close()
-
-@bp.route('/api/quizzes/with-questions', methods=['POST'])
+@router.route('/quizzes/with-questions', methods=['POST'])
 def create_quiz_with_questions():
     """
     Endpoint to create a new quiz along with its questions in a single request.
@@ -243,55 +205,46 @@ def create_quiz_with_questions():
         if conn:
             conn.close()
 
-@bp.route('/api/quizzes/category-samples', methods=['GET'])
-def get_category_samples():
-    """
-    Endpoint to retrieve random quizzes from each category.
-    Query parameter 'limit' determines how many quizzes per category (default: 3)
-    """
-    conn = None
+@router.get("/quizzes/category-samples",
+    response_model=Dict,
+    summary="Get sample quizzes by category",
+    description="Retrieve random quizzes from each category"
+)
+async def get_category_samples(
+    limit: int = Query(default=3, description="Number of quizzes per category"),
+    db: Database = Depends(get_db)
+):
     try:
-        limit = request.args.get('limit', default=3, type=int)
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT DISTINCT category FROM quiz ORDER BY category")
-        categories = cursor.fetchall()
+        # Get all unique categories
+        categories_query = "SELECT DISTINCT category FROM quiz ORDER BY category"
+        categories = await db.fetch_all(query=categories_query)
 
         result = {}
         for category_row in categories:
             category = category_row['category']
-            cursor.execute("""
+            # Get random quizzes for this category
+            quizzes_query = """
                 SELECT * FROM quiz
-                WHERE category = ?
+                WHERE category = :category
                 ORDER BY RANDOM()
-                LIMIT ?
-            """, (category, limit))
+                LIMIT :limit
+            """
+            quizzes = await db.fetch_all(
+                query=quizzes_query,
+                values={"category": category, "limit": limit}
+            )
 
-            quizzes = cursor.fetchall()
-            quiz_list = []
-            for quiz in quizzes:
-                quiz_dict = {}
-                for key in quiz.keys():
-                    quiz_dict[key] = quiz[key]
-                quiz_list.append(quiz_dict)
+            result[category] = [dict(quiz) for quiz in quizzes]
 
-            result[category] = quiz_list
-
-        return jsonify({
+        return {
             'success': True,
             'samples': result,
             'total_categories': len(categories),
             'quizzes_per_category': limit
-        })
+        }
 
     except Exception as e:
-        error_details = traceback.format_exc()
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'details': error_details
-        }), 500
-    finally:
-        if conn:
-            conn.close()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching category samples: {str(e)}"
+        )

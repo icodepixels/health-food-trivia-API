@@ -21,7 +21,7 @@ def get_db_connection():
 
 
 # QUIZZES ---------
-@app.route('/api/quizzes', methods=['GET'])
+@app.route('/quizzes', methods=['GET'])
 def get_quizzes():
     """
     Endpoint to retrieve quizzes from the database.
@@ -61,7 +61,7 @@ def get_quizzes():
 
 
 
-@app.route('/api/quizzes', methods=['POST'])
+@app.route('/quizzes', methods=['POST'])
 def create_quiz():
     """
     Endpoint to create a new quiz.
@@ -125,7 +125,7 @@ def create_quiz():
 
 
 # CATEGORIES ---------
-@app.route('/api/categories', methods=['GET'])
+@app.route('/categories', methods=['GET'])
 def get_categories():
     """
     Endpoint to retrieve all unique category names from the database.
@@ -150,7 +150,7 @@ def get_categories():
 
 
 # QUESTIONS ---------
-@app.route('/api/questions', methods=['POST'])
+@app.route('/questions', methods=['POST'])
 def add_questions():
     """
     Endpoint to add multiple questions to quizzes.
@@ -298,7 +298,7 @@ def add_questions():
             conn.close()
 
 
-@app.route('/api/questions/<int:question_id>', methods=['DELETE'])
+@app.route('/questions/<int:question_id>', methods=['DELETE'])
 def delete_question(question_id):
     """
     Endpoint to delete a specific question by its ID.
@@ -341,7 +341,7 @@ def delete_question(question_id):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/quizzes/<int:quiz_id>/questions', methods=['GET'])
+@app.route('/quizzes/<int:quiz_id>/questions', methods=['GET'])
 def get_questions_by_quiz_id(quiz_id):
     """
     Endpoint to retrieve quiz details and all its questions by quiz_id.
@@ -404,7 +404,7 @@ def get_questions_by_quiz_id(quiz_id):
             conn.close()
 
 
-@app.route('/api/quizzes/<int:quiz_id>', methods=['DELETE'])
+@app.route('/quizzes/<int:quiz_id>', methods=['DELETE'])
 def delete_quiz(quiz_id):
     """
     Endpoint to delete a specific quiz by its ID.
@@ -467,7 +467,7 @@ def delete_quiz(quiz_id):
             conn.close()
 
 
-@app.route('/api/quizzes/with-questions', methods=['POST'])
+@app.route('/quizzes/with-questions', methods=['POST'])
 def create_quiz_with_questions():
     """
     Endpoint to create a new quiz along with its questions in a single request.
@@ -629,7 +629,7 @@ def create_quiz_with_questions():
             conn.close()
 
 
-@app.route('/api/quizzes/category-samples', methods=['GET'])
+@app.route('/quizzes/category-samples', methods=['GET'])
 def get_category_samples():
     """
     Endpoint to retrieve random quizzes from each category.

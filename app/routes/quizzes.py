@@ -98,120 +98,82 @@ async def delete_quiz(quiz_id: int, db: Database = Depends(get_db)):
     except sqlite3.Error as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.route('/quizzes/with-questions', methods=['POST'])
-def create_quiz_with_questions():
-    """
-    Endpoint to create a new quiz along with its questions in a single request.
-    Accepts JSON with quiz data and an array of questions.
-    """
-    data = request.get_json()
-
-    if 'quiz' not in data:
-        return jsonify({'error': 'Missing quiz data'}), 400
-    if 'questions' not in data or not isinstance(data['questions'], list):
-        return jsonify({'error': 'Missing or invalid questions array'}), 400
-
-    quiz_data = data['quiz']
-    questions_data = data['questions']
-
-    required_quiz_fields = ['name', 'description', 'image', 'category', 'difficulty']
-    for field in required_quiz_fields:
-        if field not in quiz_data:
-            return jsonify({'error': f'Missing required quiz field: {field}'}), 400
-
-    required_question_fields = ['question_text', 'choices', 'correct_answer_index',
-                              'explanation', 'image', 'difficulty', 'category']
-
-    for i, question in enumerate(questions_data):
-        missing_fields = [field for field in required_question_fields if field not in question]
-        if missing_fields:
-            return jsonify({
-                'error': f'Question at index {i} is missing required fields: {", ".join(missing_fields)}'
-            }), 400
-
-    conn = None
+@router.post("/quizzes/with-questions")
+async def create_quiz_with_questions(
+    data: Dict,
+    db: Database = Depends(get_db)
+):
+    """Create a new quiz with questions"""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        conn.execute("BEGIN TRANSACTION")
+        if 'quiz' not in data:
+            raise HTTPException(status_code=400, detail="Missing quiz data")
+        if 'questions' not in data or not isinstance(data['questions'], list):
+            raise HTTPException(status_code=400, detail="Missing or invalid questions array")
 
-        current_time = datetime.now().strftime('%Y-%m-%d')
+        quiz_data = data['quiz']
+        questions_data = data['questions']
 
-        # Insert the quiz
-        cursor.execute('''
+        # Create quiz
+        quiz_query = """
             INSERT INTO quiz (name, description, image, category, difficulty, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
-            quiz_data['name'],
-            quiz_data['description'],
-            quiz_data['image'],
-            quiz_data['category'],
-            quiz_data['difficulty'],
-            current_time
-        ))
+            VALUES (:name, :description, :image, :category, :difficulty, :created_at)
+        """
+        quiz_values = {
+            **quiz_data,
+            "created_at": datetime.now().strftime('%Y-%m-%d')
+        }
 
-        new_quiz_id = cursor.lastrowid
+        quiz_id = await db.execute(query=quiz_query, values=quiz_values)
 
-        # Insert all questions
+        # Insert questions
         inserted_questions = []
         for question in questions_data:
+            question['quiz_id'] = quiz_id
             choices_json = json.dumps(question['choices'])
 
-            cursor.execute('''
+            question_query = """
                 INSERT INTO questions (
                     quiz_id, question_text, choices, correct_answer_index,
                     explanation, category, difficulty, image
+                ) VALUES (
+                    :quiz_id, :question_text, :choices, :correct_answer_index,
+                    :explanation, :category, :difficulty, :image
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                new_quiz_id,
-                question['question_text'],
-                choices_json,
-                question['correct_answer_index'],
-                question['explanation'],
-                question['category'],
-                question['difficulty'],
-                question['image']
-            ))
+            """
+            question_values = {
+                **question,
+                "choices": choices_json
+            }
 
-            new_question_id = cursor.lastrowid
-            cursor.execute("SELECT * FROM questions WHERE id = ?", (new_question_id,))
-            new_question = cursor.fetchone()
+            question_id = await db.execute(query=question_query, values=question_values)
 
-            question_dict = {}
-            for key in new_question.keys():
-                question_dict[key] = new_question[key]
+            # Fetch the created question
+            fetch_query = "SELECT * FROM questions WHERE id = :id"
+            new_question = await db.fetch_one(
+                query=fetch_query,
+                values={"id": question_id}
+            )
+
+            question_dict = dict(new_question)
             question_dict['choices'] = json.loads(question_dict['choices'])
             inserted_questions.append(question_dict)
 
-        # Get the created quiz
-        cursor.execute("SELECT * FROM quiz WHERE id = ?", (new_quiz_id,))
-        new_quiz = cursor.fetchone()
-        quiz_result = {}
-        for key in new_quiz.keys():
-            quiz_result[key] = new_quiz[key]
+        # Fetch the created quiz
+        fetch_quiz_query = "SELECT * FROM quiz WHERE id = :id"
+        created_quiz = await db.fetch_one(
+            query=fetch_quiz_query,
+            values={"id": quiz_id}
+        )
 
-        conn.commit()
-
-        return jsonify({
+        return {
             'success': True,
-            'quiz': quiz_result,
+            'quiz': dict(created_quiz),
             'questions': inserted_questions,
             'total_questions': len(inserted_questions)
-        }), 201
+        }
 
     except Exception as e:
-        if conn:
-            conn.rollback()
-        error_details = traceback.format_exc()
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'details': error_details
-        }), 500
-    finally:
-        if conn:
-            conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/quizzes/category-samples",
     response_model=Dict,
